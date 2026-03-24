@@ -55,6 +55,7 @@ public class NetworkManager : MonoBehaviour
 
     void Update()
     {
+        // CheckServerStatus();
         // Обработка сообщений из очереди (выполняется в главном потоке)
         lock (queueLock)
         {
@@ -69,6 +70,10 @@ public class NetworkManager : MonoBehaviour
     // ============= ЗАПУСК СЕРВЕРА =============
     void StartAsServer()
     {
+        
+        Debug.Log($"=== ЗАПУСК СЕРВЕРА ===");
+        Debug.Log($"Порт: {portInputField.text}");
+        Debug.Log($"IP: {GetLocalIPAddress()}");
         if (isRunning)
         {
             AddToChat("Сначала остановите текущее соединение!");
@@ -96,22 +101,40 @@ public class NetworkManager : MonoBehaviour
             server = new TcpListener(IPAddress.Any, port);
             server.Start();
             isRunning = true;
-
-            // Ожидание подключения
-            client = server.AcceptTcpClient();
-            isConnected = true;
-            
-            AddToChatThreadSafe("✅ Клиент подключился! Можно обмениваться сообщениями.");
-            
-            stream = client.GetStream();
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-
-            // Цикл приема сообщений
-            while (isRunning && (bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0)
+        
+            AddToChatThreadSafe($"✅ Сервер запущен на порту {port}");
+            AddToChatThreadSafe($"🌐 IP адрес сервера: {GetLocalIPAddress()}");
+        
+            // Цикл для принятия нескольких подключений (если нужно)
+            while (isRunning)
             {
-                string receivedMessage = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                AddToChatThreadSafe($"📩 Получено: {receivedMessage}");
+                AddToChatThreadSafe("⏳ Ожидание подключения...");
+            
+                // Принимаем клиента (блокирующая операция)
+                client = server.AcceptTcpClient();
+                isConnected = true;
+            
+                AddToChatThreadSafe("✅ Клиент подключился! Можно обмениваться сообщениями.");
+            
+                stream = client.GetStream();
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+            
+                // Цикл приема сообщений от текущего клиента
+                while (isRunning && isConnected && (bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0)
+                {
+                    string receivedMessage = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    AddToChatThreadSafe($"📩 Получено: {receivedMessage}");
+                }
+            
+                // Клиент отключился
+                if (isConnected)
+                {
+                    AddToChatThreadSafe("🔌 Клиент отключился");
+                    isConnected = false;
+                    stream?.Close();
+                    client?.Close();
+                }
             }
         }
         catch (System.Exception e)
@@ -237,6 +260,19 @@ public class NetworkManager : MonoBehaviour
             AddToChat("🔌 Соединение закрыто");
         });
     }
+    
+    void CheckServerStatus()
+    {
+        if (server != null)
+        {
+            Debug.Log($"Сервер запущен: {server.Server.IsBound}");
+            Debug.Log($"Локальная точка: {server.LocalEndpoint}");
+        }
+        else
+        {
+            Debug.Log("Сервер НЕ запущен!");
+        }
+    }
 
     // ============= ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =============
     void AddToChat(string message)
@@ -266,12 +302,16 @@ public class NetworkManager : MonoBehaviour
     string GetLocalIPAddress()
     {
         var host = Dns.GetHostEntry(Dns.GetHostName());
+        for (int i = 0; i < host.AddressList.Length; i++)
+        {
+            Debug.Log(host.AddressList[i].ToString());
+        }
         foreach (var ip in host.AddressList)
         {
             // AddressFamily.InterNetwork = IPv4 (игнорируем IPv6)
             if (ip.AddressFamily == AddressFamily.InterNetwork)
             {
-                return ip.ToString();
+                return host.AddressList[2].ToString();
             }
         }
         throw new System.Exception("Адаптер IPv4 не найден!");
